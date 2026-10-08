@@ -285,6 +285,8 @@ end
         @test Zarr.fill_value_decoding(nothing, Zarr.ASCIIChar) === nothing
         @test Zarr.fill_value_decoding(Any[0.0, 0.0], ComplexF64) === ComplexF64(0.0, 0.0)
         @test Zarr.fill_value_decoding(Any[1.5, -2.5], ComplexF32) === ComplexF32(1.5, -2.5)
+        @test isequal(Zarr.fill_value_decoding(Any["NaN", "NaN"], ComplexF32), ComplexF32(NaN32, NaN32))
+        @test Zarr.fill_value_decoding(Any["Infinity", 0.0], ComplexF64) === ComplexF64(Inf, 0.0)
         # A structured dtype's fill value is the Base64 of its bytes: 0x0001, 0xfffe little-endian.
         @test Zarr.fill_value_encoding(Complex{Int16}(1, -2)) == "AQD+/w=="
         @test Zarr.fill_value_decoding("AQD+/w==", Complex{Int16}) === Complex{Int16}(1, -2)

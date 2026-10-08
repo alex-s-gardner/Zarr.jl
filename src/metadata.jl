@@ -303,7 +303,9 @@ fill_value_decoding(v, T) = T(v)
 fill_value_decoding(v::Number, T::Type{String}) = v == 0 ? "" : T(UInt8[v])
 fill_value_decoding(v, ::Type{ASCIIChar}) = v == "" ? nothing : v
 fill_value_decoding(v::Nothing, ::Type{Zarr.ASCIIChar}) = v
-fill_value_decoding(v::Vector, T::Type{<:Complex}) = T(v[1], v[2])
+# Each part is decoded as a real fill value, so a part spelled "NaN" or "Infinity" reads as one.
+fill_value_decoding(v::Vector, T::Type{<:Complex}) =
+    T(fill_value_decoding(v[1], real(T)), fill_value_decoding(v[2], real(T)))
 function fill_value_decoding(v::AbstractString, T::Type{<:Complex{<:Signed}})
     bytes = base64decode(v)
     length(bytes) == sizeof(T) || throw(ArgumentError(
