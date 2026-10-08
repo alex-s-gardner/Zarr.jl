@@ -4,6 +4,7 @@ version = "0.10.2"
 authors = ["Fabian Gans <fgans@bgc-jena.mpg.de>"]
 
 [deps]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
 CRC32c = "8bf52ea8-c179-5cab-976a-9e18b702a9bc"
 ChunkCodecCore = "0b6fb165-00bc-4d37-ab8b-79f91016dbe1"
@@ -30,6 +31,7 @@ ZarrAWSS3Ext = "AWSS3"
 
 [compat]
 AWSS3 = "0.10, 0.11"
+Base64 = "1.10, 1.11"
 Blosc = "0.5, 0.6, 0.7"
 CRC32c = "1.10, 1.11"
 ChunkCodecCore = "1"
