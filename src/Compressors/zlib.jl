@@ -6,7 +6,7 @@ This file implements a Zlib compressor via ChunkCodecLibZlib.jl.
 =#
 
 using ChunkCodecLibZlib: ZlibEncodeOptions
-using ChunkCodecCore: encode, decode, decode!
+using ChunkCodecCore: encode, decode, decode!, try_decode!
 
 """
     ZlibCompressor(clevel=-1)
@@ -28,6 +28,17 @@ end
 
 function zuncompress(a, z::ZlibCompressor, T)
     result = decode(z.config.codec, a)
+    _reinterpret(Base.nonmissingtype(T),result)
+end
+
+# Decodes into `dst` when the decompressed bytes fill it exactly, returning whether they did.
+function zuncompress_into!(dst::Vector{UInt8}, a, z::ZlibCompressor)
+    n = try_decode!(z.config.codec, dst, a)
+    return n.val == length(dst)
+end
+
+function zuncompress_sized(a, z::ZlibCompressor, T, nbytes)
+    result = decode(z.config.codec, a; size_hint = nbytes)
     _reinterpret(Base.nonmissingtype(T),result)
 end
 

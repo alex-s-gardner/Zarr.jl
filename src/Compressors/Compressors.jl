@@ -46,8 +46,17 @@ function zcompress!(compressed, data, c, f)
     zcompress!(compressed, a2, c)
 end
 
+# The decompressed size is about the chunk's: a bytes filter such as `shuffle` keeps the size, and one that
+# does not (`fletcher32`'s checksum, a narrowing `delta`) only costs the codec a resize of its output.
+zuncompress_sized(compressed, c, T, nbytes) = zuncompress(compressed, c, T)
+
+# A compressor that can decode into a buffer it is handed implements this; `false` means it did not.
+zuncompress_into!(dst::Vector{UInt8}, compressed, c) = false
+
 function zuncompress!(data, compressed, c, f)
-    data2 = zuncompress(compressed, c, desttype(last(f)))
+    T = eltype(data)
+    data2 = isbitstype(T) ? zuncompress_sized(compressed, c, desttype(last(f)), sizeof(T) * length(data)) :
+        zuncompress(compressed, c, desttype(last(f)))
     a2 = foldr(f, init = data2) do fnow, anow
         zdecode(anow, fnow)
     end

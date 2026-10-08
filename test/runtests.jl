@@ -413,6 +413,24 @@ end
     @test size(ca) == (10,10,2)
 end
 
+@testset "a read spanning chunks decodes them on several threads" begin
+  A = rand(Float32, 37, 29)
+  for (compressor, filters) in ((Zarr.NoCompressor(), nothing), (Zarr.ZlibCompressor(), nothing),
+                                (Zarr.ZlibCompressor(), [Zarr.ShuffleFilter(elementsize = 4)]))
+    z = zcreate(Float32, 37, 29; chunks = (8, 5), compressor, filters, fill_value = -1f0)
+    z[:, 1:25] = A[:, 1:25]
+    want = copy(A)
+    want[:, 26:29] .= -1f0
+    @test z[:, :] == want
+    @test z[3:30, 2:27] == want[3:30, 2:27]
+    # Through a lazy permutation, which reads into a `PermutedDimsArray` of the result.
+    @test permutedims(z, (2, 1))[2:28, 3:30] == permutedims(want)[2:28, 3:30]
+    windows = [(rand(1:20):37, rand(1:15):29) for _ in 1:16]
+    got = fetch.([Threads.@spawn z[w...] for w in windows])
+    @test all(got[i] == want[windows[i]...] for i in eachindex(windows))
+  end
+end
+
 @testset "string/Char array getindex/setindex" begin
   aa = ["this", "is", "all ", "ascii"]
   bb = ["And" "Unicode"; "ματριξ" missing]

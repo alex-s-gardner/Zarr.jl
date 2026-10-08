@@ -244,11 +244,11 @@ function readblock!(aout::AbstractArray{<:Any,N}, z::ZArray{<:Any, N}, r::Cartes
     uncompress_raw!(aout, z, chunk_compressed)
     return aout
   end
-  # Allocate the chunk-shaped scratch buffer. Reads always either fill it
-  # from a decode (which writes every element) or fall through to the
-  # fill-value path (which calls `fill!` itself), so we don't need to
-  # pre-zero it.
-  a = getchunkarray_undef(z)
+  # The chunk-shaped scratch buffer, or `nothing` where chunks are copied
+  # straight from their bytes. Reads always either fill it from a decode
+  # (which writes every element) or fall through to the fill-value path
+  # (which calls `fill!` itself), so we don't need to pre-zero it.
+  a = chunk_buffer(z)
   # Now loop through the chunks
   c = Channel{Pair{eltype(blockr),Union{Nothing,Vector{UInt8}}}}(channelsize(z.storage))
   
@@ -258,23 +258,62 @@ function readblock!(aout::AbstractArray{<:Any,N}, z::ZArray{<:Any, N}, r::Cartes
   bind(c,task)
 
   try 
-    for i in 1:length(blockr)
-      
-      bI,chunk_compressed = take!(c)
-      
-      current_chunk_offsets = map((s,i)->s*(i-1),size(a),Tuple(bI))
-
-      indranges    = map(boundint,r.indices,size(a),current_chunk_offsets)
-      
-      uncompress_to_output!(aout,output_base_offsets,z,chunk_compressed,current_chunk_offsets,a,indranges)
-      nothing
+    ndecoders = parallel_decoders(aout, length(blockr))
+    if ndecoders == 1
+      for i in 1:length(blockr)
+        bI,chunk_compressed = take!(c)
+        decode_chunk_to_output!(aout,output_base_offsets,z,r,bI,chunk_compressed,a)
+      end
+    else
+      # Each decoder takes chunks off the channel until it is drained and writes the part of `aout`
+      # its chunk covers. Chunks cover disjoint parts, so the writes never overlap.
+      decoders = map(1:ndecoders) do k
+        Threads.@spawn begin
+          buffer = k == 1 ? a : chunk_buffer(z)
+          try
+            for (bI,chunk_compressed) in c
+              decode_chunk_to_output!(aout,output_base_offsets,z,r,bI,chunk_compressed,buffer)
+            end
+          finally
+            k == 1 || give_scratch!(buffer)
+          end
+        end
+      end
+      # A decoder's failure is the read's, as it would be decoding serially.
+      for t in decoders
+        try
+          wait(t)
+        catch e
+          e isa TaskFailedException ? throw(e.task.exception) : rethrow()
+        end
+      end
     end
   finally
     close(c)
+    give_scratch!(a)
   end
   
   aout
 end
+
+function decode_chunk_to_output!(aout,output_base_offsets,z,r,bI,chunk_compressed,a)
+  chunks = z.metadata.chunks
+  current_chunk_offsets = map((s,i)->s*(i-1),chunks,Tuple(bI))
+  indranges = map(boundint,r.indices,chunks,current_chunk_offsets)
+  uncompress_to_output!(aout,output_base_offsets,z,chunk_compressed,current_chunk_offsets,a,indranges)
+  nothing
+end
+
+# How many tasks decode the chunks of one read. Several, when there are threads to run them and more
+# than one chunk, and `aout` is an array whose disjoint elements can be written from different threads
+# at once: plain memory, element by element. A `BitArray` packs elements into shared words, and an
+# arbitrary `AbstractArray` may not be safe to write concurrently at all, so those decode serially.
+parallel_decoders(aout, nchunks) =
+  disjoint_writes_safe(aout) ? max(1, min(Threads.nthreads(), nchunks)) : 1
+
+disjoint_writes_safe(a::Array) = isbitstype(eltype(a))
+disjoint_writes_safe(a::Union{SubArray,PermutedDimsArray,Base.ReshapedArray}) = disjoint_writes_safe(parent(a))
+disjoint_writes_safe(::AbstractArray) = false
 
 function writeblock!(ain::AbstractArray{<:Any,N}, z::ZArray{<:Any, N}, r::CartesianIndices{N}) where {N}
 
@@ -368,15 +407,36 @@ end
 
 dotminus(x,y) = x.-y
 
-function uncompress_to_output!(aout,output_base_offsets,z,chunk_compressed,current_chunk_offsets,a,indranges)
+# An uncompressed, unfiltered chunk is its elements' bytes, so the part of it a read needs is copied
+# straight out of those bytes instead of through the chunk-sized buffer `a`. A store that hands back a
+# view of a memory-mapped file then touches only the pages of the chunk the read covers.
+const DirectCopyArray{T,N} = ZArray{T,N,<:AbstractStore,<:MetadataV2{T,N,NoCompressor,Nothing}}
+
+chunk_buffer(z::ZArray{T}) where {T} = Missing <: T || !isbitstype(T) ? getchunkarray_undef(z) : take_scratch(T, z.metadata.chunks)
+chunk_buffer(z::DirectCopyArray{T}) where {T} = isbitstype(T) && ndims(z) > 0 ? nothing : getchunkarray_undef(z)
+
+function uncompress_to_output!(aout,output_base_offsets,z::DirectCopyArray{T,N},
+    chunk_compressed::Vector{UInt8},current_chunk_offsets,a::Nothing,indranges) where {T,N}
+  chunks = z.metadata.chunks
+  length(chunk_compressed) == sizeof(T) * prod(chunks) || return uncompress_to_output_buffered!(
+    aout,output_base_offsets,z,chunk_compressed,current_chunk_offsets,getchunkarray_undef(z),indranges)
+  src = reshape(reinterpret(T, chunk_compressed), chunks)
+  aout[dotminus.(indranges, output_base_offsets)...] = view(src, dotminus.(indranges, current_chunk_offsets)...)
+  nothing
+end
+
+uncompress_to_output!(aout,output_base_offsets,z,chunk_compressed,current_chunk_offsets,a,indranges) =
+  uncompress_to_output_buffered!(aout,output_base_offsets,z,chunk_compressed,current_chunk_offsets,
+    a === nothing ? getchunkarray_undef(z) : a,indranges)
+
+function uncompress_to_output_buffered!(aout,output_base_offsets,z,chunk_compressed,current_chunk_offsets,a,indranges)
   
   uncompress_raw!(a,z,chunk_compressed)
   
   if length.(indranges) == size(a)
     aout[dotminus.(indranges, output_base_offsets)...] = ndims(a) == 0 ? a[1] : a
   else
-    curchunk = a[dotminus.(indranges,current_chunk_offsets)...]
-    aout[dotminus.(indranges, output_base_offsets)...] = curchunk
+    aout[dotminus.(indranges, output_base_offsets)...] = view(a, dotminus.(indranges,current_chunk_offsets)...)
   end
 end
 
