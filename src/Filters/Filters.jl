@@ -62,7 +62,7 @@ Returns the destination type of the filter.
 """
 function desttype end
 
-filterdict = Dict{String,Type{<:Filter}}()
+const filterdict = Dict{String,Type{<:Filter}}()
 
 function getfilters(d::Dict) 
     if !haskey(d,"filters")

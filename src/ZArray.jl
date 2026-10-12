@@ -400,7 +400,13 @@ function uncompress_raw!(a,z::ZArray{<:Any,N},curchunk) where N
     end
     fill!(a, z.metadata.fill_value)
   else
-    pipeline_decode!(get_pipeline(z.metadata), a, curchunk; fill_value=z.metadata.fill_value)
+    # One call per case of the fill value's `Union{Nothing,T}`, so each keyword call is concrete.
+    fv = z.metadata.fill_value
+    if fv === nothing
+      pipeline_decode!(get_pipeline(z.metadata), a, curchunk; fill_value=nothing)
+    else
+      pipeline_decode!(get_pipeline(z.metadata), a, curchunk; fill_value=fv)
+    end
   end
   a
 end

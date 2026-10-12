@@ -289,7 +289,7 @@ isemptysub(s::AbstractStore, p) = isempty(subkeys(s,p)) && isempty(subdirs(s,p))
 
 #Here different storage backends can register regexes that are checked against
 #during auto-check of storage format when doing zopen
-storageregexlist = Pair[]
+const storageregexlist = Pair[]
 push!(storageregexlist, r"^s3://" => S3Store)
 
 #include("formattedstore.jl")
