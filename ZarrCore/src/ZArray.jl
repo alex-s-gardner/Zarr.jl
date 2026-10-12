@@ -375,10 +375,14 @@ function uncompress_raw!(a,z::ZArray{<:Any,N},curchunk) where N
     end
     fill!(a, z.metadata.fill_value)
   else
-    pipeline_decode!(get_pipeline(z.metadata), a, curchunk; fill_value=z.metadata.fill_value)
+    _decode_chunk!(get_pipeline(z.metadata), a, curchunk, z.metadata.fill_value)
   end
   a
 end
+
+# A function barrier: `fill_value` is a `Union{T,Nothing}` field, and passed positionally the call is
+# split on it, so each method instance makes a keyword call of one concrete type.
+_decode_chunk!(p, a, curchunk, fill_value) = pipeline_decode!(p, a, curchunk; fill_value)
 
 dotminus(x,y) = x.-y
 
