@@ -300,6 +300,13 @@ end
         @test ZarrCore.typestr(Vector{Int64}) === "|O"
         @test ZarrCore.typestr(DateTime64{Day}) === "<M8[D]"
         @test ZarrCore.typestr(DateTime64{Nanosecond}) === "<M8[ns]"
+        @test ZarrCore.typestr(Complex{Int16}) == [["r", "<i2"], ["i", "<i2"]]
+        @test ZarrCore.typestr(Complex{Int32}) == [["r", "<i4"], ["i", "<i4"]]
+        @test ZarrCore.typestr(Any[Any["r", "<i2"], Any["i", "<i2"]]) === Complex{Int16}
+        @test ZarrCore.typestr(Any[Any["r", "|i1"], Any["i", "|i1"]]) === Complex{Int8}
+        @test_throws "the only structured dtype read is" ZarrCore.typestr(Any[Any["a", "<i2"], Any["b", "<i2"]])
+        @test_throws "the only structured dtype read is" ZarrCore.typestr(Any[Any["r", "<f4"], Any["i", "<f4"]])
+        @test_throws "the only structured dtype read is" ZarrCore.typestr(Any[Any["r", "<i2"], Any["i", "<i4"]])
     end
 
     @testset "Metadata struct and JSON representation" begin
@@ -375,6 +382,30 @@ end
         @test Zarr.fill_value_decoding(nothing, ZarrCore.ASCIIChar) === nothing
         @test Zarr.fill_value_decoding(Any[0.0, 0.0], ComplexF64) === ComplexF64(0.0, 0.0)
         @test Zarr.fill_value_decoding(Any[1.5, -2.5], ComplexF32) === ComplexF32(1.5, -2.5)
+        # A structured dtype's fill value is the Base64 of its bytes: 0x0001, 0xfffe little-endian.
+        @test Zarr.fill_value_encoding(Complex{Int16}(1, -2)) == "AQD+/w=="
+        @test Zarr.fill_value_decoding("AQD+/w==", Complex{Int16}) === Complex{Int16}(1, -2)
+        @test_throws "a Complex{Int16} needs 4" Zarr.fill_value_decoding("AQA=", Complex{Int16})
+    end
+
+    @testset "Complex integer arrays" begin
+        A = Complex{Int16}.(reshape(Int16.(1:60), 6, 10), reshape(Int16.(-60:-1), 6, 10))
+        for compressor in (Zarr.NoCompressor(), Zarr.ZlibCompressor())
+            z = zcreate(Complex{Int16}, 6, 10; chunks = (4, 3), compressor,
+                fill_value = Complex{Int16}(7, -7))
+            @test z.metadata.dtype == [["r", "<i2"], ["i", "<i2"]]
+            z[:, 1:9] = A[:, 1:9]
+            @test z[:, 1:9] == A[:, 1:9]
+            @test all(==(Complex{Int16}(7, -7)), z[:, 10])
+            cycled = ZarrCore.Metadata(json(z.metadata), false)
+            @test cycled == z.metadata
+            @test eltype(cycled) === Complex{Int16}
+            @test cycled.fill_value === Complex{Int16}(7, -7)
+        end
+        dir = mktempdir()
+        z = zcreate(Complex{Int32}, 5, 4; path = dir, chunks = (2, 2))
+        z[:, :] = Complex{Int32}.(1:5, (1:4)')
+        @test zopen(dir)[:, :] == Complex{Int32}.(1:5, (1:4)')
     end
 end
 
