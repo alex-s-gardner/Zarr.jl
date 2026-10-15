@@ -549,6 +549,33 @@ end
     z.storage.a["1.1"] = ZarrCore.zcompress(rand(Float32, 8, 5), Zarr.ZlibCompressor())
     @test size(z[:, :]) == (37, 29)
   end
+
+  @testset "decoder tasks share no variable of readblock!" begin
+    # A variable that a decoder task assigns and `readblock!` also holds is boxed and shared by every
+    # decoder, which then overwrite each other's chunk index and bytes. Sharing shows as `Core.Box` in
+    # the lowered code, so this fails whenever the decoders are given such a variable, on any machine.
+    ms = [m for m in methods(ZarrCore.readblock!) if m.sig <: Tuple{typeof(ZarrCore.readblock!),AbstractArray,ZarrCore.ZArray,CartesianIndices}]
+    @test !isempty(ms)
+    for m in ms
+      @test !any(st -> occursin("Core.Box", string(st)), Base.uncompressed_ast(m).code)
+    end
+  end
+
+  @testset "concurrent multi-chunk reads of many small chunks" begin
+    # Many tiny chunks keep the decoders taking from the channel back to back.
+    B = reshape(Int32.(1:(96 * 96)), 96, 96)
+    for compressor in (Zarr.NoCompressor(), Zarr.ZlibCompressor())
+      z = zcreate(Int32, 96, 96; chunks = (4, 4), compressor, fill_value = Int32(-1))
+      z[:, :] = B
+      wrong = Threads.Atomic{Int}(0)
+      deadline = time() + 1.0
+      tasks = [Threads.@spawn(while time() < deadline
+          z[:, :] == B || Threads.atomic_add!(wrong, 1)
+        end) for _ in 1:4]
+      foreach(wait, tasks)
+      @test wrong[] == 0
+    end
+  end
 end
 
 @testset "chunk scratch buffers" begin
