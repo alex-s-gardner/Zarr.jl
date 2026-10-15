@@ -21,6 +21,7 @@ This changelog covers every package in this repository. Version headings follow 
 - Integer arrays using `DeltaFilter` now round-trip correctly when values wrap around the type's limits, such as `Int8[-128, 127, -128]`. [#336](https://github.com/JuliaIO/Zarr.jl/pull/336), fixes [#335](https://github.com/JuliaIO/Zarr.jl/issues/335)
 - Zarr v2 arrays that use the `shuffle` or `fletcher32` filter with element types wider than one byte can now be read. Previously they could be written, but reading them threw a `BoundsError`. [#354](https://github.com/JuliaIO/Zarr.jl/pull/354)
 - `ZarrHTTP` can now serve a `DirectoryStore` from its root path. It also rejects requests for files outside the served directory, including `..` paths and symlinks that point elsewhere, with a `400` response that explains why. [#344](https://github.com/JuliaIO/Zarr.jl/pull/344)
+- Zarr v2 arrays with complex-integer element types (`Complex{Int8}`, `Complex{Int16}`, `Complex{Int32}`, `Complex{Int64}`) can now be written and read. NumPy has no complex-integer type, so they are stored as the structured dtype `[["r", T], ["i", T]]` with the fill value as the Base64 of its bytes. Any other structured dtype is refused with an error that names it.
 - `ZarrCore` is bumped to 0.11.1 to release the `ZarrCore` changes above. [#356](https://github.com/JuliaIO/Zarr.jl/pull/356)
 
 ## v0.11.0 - 2026-10-06
