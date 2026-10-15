@@ -285,10 +285,7 @@ function readblock!(aout::AbstractArray{<:Any,N}, z::ZArray{<:Any, N}, r::Cartes
         Threads.@spawn begin
           buffer = k == 1 ? a : chunk_buffer(z)
           try
-            while (item = take_chunk!(c)) !== nothing
-              bI,chunk_compressed = item
-              decode_chunk_to_output!(aout,output_base_offsets,z,r,bI,chunk_compressed,buffer)
-            end
+            decode_chunks!(aout,output_base_offsets,z,r,c,buffer)
           catch
             close(c)  # stops the other decoders
             rethrow()
@@ -326,6 +323,17 @@ function take_chunk!(c)
     e isa InvalidStateException && e.state === :closed && return nothing
     rethrow()
   end
+end
+
+# Decodes the chunks that arrive on `c` until it is closed and drained. Each chunk's index and bytes are
+# locals of this call, so decoders running it at once share only `c` and `aout`. They must not be variables
+# of `readblock!`: a task that assigned those would overwrite another's.
+function decode_chunks!(aout,output_base_offsets,z,r,c,buffer)
+  while (item = take_chunk!(c)) !== nothing
+    bI,chunk_compressed = item
+    decode_chunk_to_output!(aout,output_base_offsets,z,r,bI,chunk_compressed,buffer)
+  end
+  nothing
 end
 
 function decode_chunk_to_output!(aout,output_base_offsets,z,r,bI,chunk_compressed,a)
