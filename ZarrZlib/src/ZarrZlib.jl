@@ -8,7 +8,7 @@ module ZarrZlib
 import JSON # for JSON.lower
 
 using ChunkCodecLibZlib: ZlibEncodeOptions, GzipCodec, GzipEncodeOptions
-using ChunkCodecCore: encode, decode, decode!
+using ChunkCodecCore: encode, decode, decode!, try_decode!
 
 # Qualify methods that extend ZarrCore or V3Codecs generics.
 import ZarrCore
@@ -42,6 +42,17 @@ end
 
 function ZarrCore.zuncompress(a, z::ZlibCompressor, T)
     result = decode(z.config.codec, a)
+    _reinterpret(Base.nonmissingtype(T),result)
+end
+
+# Decodes into `dst` when the decompressed bytes fill it exactly, returning whether they did.
+function ZarrCore.zuncompress_into!(dst::Vector{UInt8}, a, z::ZlibCompressor)
+    n = try_decode!(z.config.codec, dst, a)
+    return n.val == length(dst)
+end
+
+function ZarrCore.zuncompress_sized(a, z::ZlibCompressor, T, nbytes)
+    result = decode(z.config.codec, a; size_hint = nbytes)
     _reinterpret(Base.nonmissingtype(T),result)
 end
 
