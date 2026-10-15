@@ -506,6 +506,74 @@ end
     @test size(ca) == (10,10,2)
 end
 
+# A store whose read of one chunk throws.
+struct FailingChunkStore{S<:ZarrCore.AbstractStore} <: ZarrCore.AbstractStore
+  inner::S
+  chunk::String
+end
+function ZarrCore.store_readchunk(s::FailingChunkStore, p, i::CartesianIndex, e::ZarrCore.AbstractChunkKeyEncoding)
+  ZarrCore.citostring(e, i) == s.chunk && error("store failure")
+  return ZarrCore.store_readchunk(s.inner, p, i, e)
+end
+
+@testset "a read spanning chunks decodes them on several threads" begin
+  A = rand(Float32, 37, 29)
+  for (compressor, filters) in ((Zarr.NoCompressor(), nothing), (Zarr.ZlibCompressor(), nothing),
+                                (Zarr.ZlibCompressor(), [Zarr.ShuffleFilter(elementsize = 4)]),
+                                (Zarr.BloscCompressor(), nothing))
+    z = zcreate(Float32, 37, 29; chunks = (8, 5), compressor, filters, fill_value = -1f0)
+    z[:, 1:25] = A[:, 1:25]
+    want = copy(A)
+    want[:, 26:29] .= -1f0
+    @test z[:, :] == want
+    @test z[3:30, 2:27] == want[3:30, 2:27]
+    # Through a lazy permutation, which reads into a `PermutedDimsArray` of the result.
+    @test permutedims(z, (2, 1))[2:28, 3:30] == permutedims(want)[2:28, 3:30]
+    # A destination that is not plain memory decodes serially, and reads the same values.
+    serial = Matrix{Union{Missing,Float32}}(undef, 37, 29)
+    ZarrCore.readblock!(serial, z, CartesianIndices((1:37, 1:29)))
+    @test serial == want
+    windows = [(rand(1:20):37, rand(1:15):29) for _ in 1:16]
+    got = fetch.([Threads.@spawn z[w...] for w in windows])
+    @test all(got[i] == want[windows[i]...] for i in eachindex(windows))
+  end
+
+  @testset "a failing read throws, whichever way it decodes" begin
+    z = zcreate(Float32, 37, 29; chunks = (8, 5), compressor = Zarr.ZlibCompressor(), fill_value = -1f0)
+    z[:, :] = A
+    flaky = ZarrCore.ZArray(z.metadata, FailingChunkStore(z.storage, "2.3"), z.path, z.attrs, false)
+    @test_throws "store failure" flaky[:, :]
+    @test_throws "store failure" ZarrCore.readblock!(
+      Matrix{Union{Missing,Float32}}(undef, 37, 29), flaky, CartesianIndices((1:37, 1:29)))
+    # A chunk that does not decode fails the read, and later reads are unaffected.
+    z.storage.a["1.1"] = UInt8[0x01, 0x02, 0x03]
+    @test_throws Exception z[:, :]
+    z.storage.a["1.1"] = ZarrCore.zcompress(rand(Float32, 8, 5), Zarr.ZlibCompressor())
+    @test size(z[:, :]) == (37, 29)
+  end
+end
+
+@testset "chunk scratch buffers" begin
+  a = ZarrCore.take_scratch(Float32, (5, 7))
+  @test size(a) == (5, 7)
+  bytes = ZarrCore.SCRATCH_BYTES[]
+  ZarrCore.give_scratch!(a)
+  @test ZarrCore.SCRATCH_BYTES[] == bytes + sizeof(a)
+  @test ZarrCore.take_scratch(Float32, (5, 7)) === a
+  @test ZarrCore.SCRATCH_BYTES[] == bytes
+  # Only bits types are kept, and no more than SCRATCH_PER_SHAPE of one shape.
+  ZarrCore.give_scratch!(Vector{String}(undef, 3))
+  @test ZarrCore.SCRATCH_BYTES[] == bytes
+  for _ in 1:(ZarrCore.SCRATCH_PER_SHAPE + 8)
+    ZarrCore.give_scratch!(Array{Int16}(undef, 3, 3))
+  end
+  @test ZarrCore.SCRATCH_BYTES[] - bytes == ZarrCore.SCRATCH_PER_SHAPE * sizeof(Int16) * 9
+  for _ in 1:ZarrCore.SCRATCH_PER_SHAPE
+    ZarrCore.take_scratch(Int16, (3, 3))
+  end
+  @test ZarrCore.SCRATCH_BYTES[] == bytes
+end
+
 @testset "string/Char array getindex/setindex" begin
   aa = ["this", "is", "all ", "ascii"]
   bb = ["And" "Unicode"; "ματριξ" missing]

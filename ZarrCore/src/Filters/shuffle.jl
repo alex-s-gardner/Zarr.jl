@@ -52,6 +52,22 @@ function zdecode(a::AbstractArray, c::ShuffleFilter)
     return dest
 end
 
+# A shuffle undone straight into `data`'s bytes, which saves the shuffled copy and the copy out of it.
+function zuncompress!(data::DenseArray, compressed, c, f::Tuple{ShuffleFilter})
+    isbitstype(eltype(data)) || return invoke(zuncompress!, Tuple{Any,Any,Any,Any}, data, compressed, c, f)
+    only(f).elementsize > 1 || return invoke(zuncompress!, Tuple{Any,Any,Any,Any}, data, compressed, c, f)
+    nbytes = sizeof(eltype(data)) * length(data)
+    shuffled = take_scratch(UInt8, (nbytes,))
+    try
+        zuncompress_into!(shuffled, compressed, c) ||
+            return invoke(zuncompress!, Tuple{Any,Any,Any,Any}, data, compressed, c, f)
+        _do_unshuffle!(reinterpret(UInt8, vec(data)), shuffled, only(f).elementsize)
+    finally
+        give_scratch!(shuffled)
+    end
+    return data
+end
+
 function getfilter(::Type{ShuffleFilter}, d::Dict)
     return ShuffleFilter(d["elementsize"])
 end
