@@ -288,16 +288,16 @@ end
 isemptysub(s::AbstractStore, p) = isempty(subkeys(s,p)) && isempty(subdirs(s,p))
 
 """
-    StoreRegexList <: AbstractVector{Pair}
+    StoreRegexList <: AbstractVector{Pair{Regex,Type}}
 
 URL-pattern registry used by [`storefromstring`](@ref). The first match wins.
 Entries are sorted by decreasing pattern length; equal-length entries retain
 insertion order.
 """
-struct StoreRegexList <: AbstractVector{Pair}
-  entries::Vector{Pair}
+struct StoreRegexList <: AbstractVector{Pair{Regex,Type}}
+  entries::Vector{Pair{Regex,Type}}
 end
-StoreRegexList() = StoreRegexList(Pair[])
+StoreRegexList() = StoreRegexList(Pair{Regex,Type}[])
 
 Base.size(l::StoreRegexList) = size(l.entries)
 Base.getindex(l::StoreRegexList, i::Int) = l.entries[i]
@@ -308,7 +308,8 @@ _regex_specificity(r::Regex) = ncodeunits(r.pattern)
 _regex_specificity(x) = ncodeunits(string(x))
 _entry_specificity(p::Pair) = _regex_specificity(first(p))
 
-function _insert_by_specificity!(l::StoreRegexList, p::Pair, ties_first::Bool)
+function _insert_by_specificity!(l::StoreRegexList, pair::Pair, ties_first::Bool)
+  p = convert(Pair{Regex,Type}, pair)
   s = _entry_specificity(p)
   i = if ties_first
     findfirst(e -> _entry_specificity(e) <= s, l.entries)
