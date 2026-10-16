@@ -6,6 +6,9 @@ This changelog covers every package in this repository. Version headings follow 
 
 - `consolidate_metadata(g)` of a Zarr v3 group now writes the consolidated metadata into the group's `zarr.json`. Previously it wrote a v2 `.zmetadata` file.
 - `consolidate_metadata(store, "", ZarrFormat(3))` now includes the children of the store root. Previously their paths started with `/`, so they were not found.
+- Zarr v2 arrays with complex-integer element types (`Complex{Int8}`, `Complex{Int16}`, `Complex{Int32}`, `Complex{Int64}`) can now be written and read. NumPy has no complex-integer type, so they are stored as the structured dtype `[["r", T], ["i", T]]` with the fill value as the Base64 of its bytes. Any other structured dtype is refused with an error that names it.
+- A read that spans several chunks now decodes them on up to `Threads.nthreads()` tasks when the destination is plain memory (an `Array`, or a view, permutation or reshape of one); other destinations decode serially. An uncompressed, unfiltered Zarr v2 chunk is copied straight from its bytes, without a chunk-sized buffer, so a store that returns a view of a memory-mapped file reads only the pages a read touches. Chunk buffers, and the decompressed bytes of a zlib and shuffle chunk, are reused across reads, and a shuffle is undone straight into the output. `ZarrZlib` implements the new `ZarrCore.zuncompress_sized` and `ZarrCore.zuncompress_into!` hooks for this.
+- Zarr v2 arrays whose complex fill value has a NaN or infinite part, written as `"NaN"` or `"Infinity"` as for real fill values, can now be opened. Previously the fill value threw when read.
 
 ## v0.11.2 - 2026-10-16
 
@@ -21,9 +24,6 @@ This changelog covers every package in this repository. Version headings follow 
 - Integer arrays using `DeltaFilter` now round-trip correctly when values wrap around the type's limits, such as `Int8[-128, 127, -128]`. [#336](https://github.com/JuliaIO/Zarr.jl/pull/336), fixes [#335](https://github.com/JuliaIO/Zarr.jl/issues/335)
 - Zarr v2 arrays that use the `shuffle` or `fletcher32` filter with element types wider than one byte can now be read. Previously they could be written, but reading them threw a `BoundsError`. [#354](https://github.com/JuliaIO/Zarr.jl/pull/354)
 - `ZarrHTTP` can now serve a `DirectoryStore` from its root path. It also rejects requests for files outside the served directory, including `..` paths and symlinks that point elsewhere, with a `400` response that explains why. [#344](https://github.com/JuliaIO/Zarr.jl/pull/344)
-- Zarr v2 arrays with complex-integer element types (`Complex{Int8}`, `Complex{Int16}`, `Complex{Int32}`, `Complex{Int64}`) can now be written and read. NumPy has no complex-integer type, so they are stored as the structured dtype `[["r", T], ["i", T]]` with the fill value as the Base64 of its bytes. Any other structured dtype is refused with an error that names it.
-- A read that spans several chunks now decodes them on up to `Threads.nthreads()` tasks when the destination is plain memory (an `Array`, or a view, permutation or reshape of one); other destinations decode serially. An uncompressed, unfiltered Zarr v2 chunk is copied straight from its bytes, without a chunk-sized buffer, so a store that returns a view of a memory-mapped file reads only the pages a read touches. Chunk buffers, and the decompressed bytes of a zlib and shuffle chunk, are reused across reads, and a shuffle is undone straight into the output. `ZarrZlib` implements the new `ZarrCore.zuncompress_sized` and `ZarrCore.zuncompress_into!` hooks for this.
-- Zarr v2 arrays whose complex fill value has a NaN or infinite part, written as `"NaN"` or `"Infinity"` as for real fill values, can now be opened. Previously the fill value threw when read.
 - `ZarrCore` is bumped to 0.11.1 to release the `ZarrCore` changes above. [#356](https://github.com/JuliaIO/Zarr.jl/pull/356)
 
 ## v0.11.0 - 2026-10-06
